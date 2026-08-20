@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="A cube and a rectangular cuboid interpenetrating — the cuboid passes through the cube">
+  <defs>
+    <filter id="shCube" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#4F46E5" flood-opacity="0.10"/>
+    </filter>
+    <filter id="shBeam" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#4F46E5" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <!-- ===== CUBE (正方体) ===== -->
+  <g filter="url(#shCube)">
+    <!-- left face -->
+    <polygon points="181,231 141,191 141,341 181,381" fill="#D8D4E6" stroke="#CEC9DD" stroke-width="2.5" stroke-linejoin="round"/>
+    <!-- top face -->
+    <polygon points="181,231 331,231 291,191 141,191" fill="#F5F4FA" stroke="#CEC9DD" stroke-width="2.5" stroke-linejoin="round"/>
+    <!-- front face -->
+    <polygon points="181,231 331,231 331,381 181,381" fill="#EAE8F1" stroke="#CEC9DD" stroke-width="2.5" stroke-linejoin="round"/>
+  </g>
+
+  <!-- ===== CUBOID (长方体) — the two ends sticking out of the cube ===== -->
+  <g filter="url(#shBeam)">
+    <!-- left end cap -->
+    <polygon points="40,256 0,216 0,296 40,336" fill="#DCD6F0" stroke="#BCB4E4" stroke-width="2.5" stroke-linejoin="round"/>
+    <!-- left segment: top + front -->
+    <polygon points="40,256 181,256 141,216 0,216" fill="#F2EFFB" stroke="#BCB4E4" stroke-width="2.5" stroke-linejoin="round"/>
+    <polygon points="40,256 181,256 181,336 40,336" fill="#E8E4F6" stroke="#BCB4E4" stroke-width="2.5" stroke-linejoin="round"/>
+
+    <!-- right end cap -->
+    <polygon points="472,256 432,216 432,296 472,336" fill="#DCD6F0" stroke="#BCB4E4" stroke-width="2.5" stroke-linejoin="round"/>
+    <!-- right segment: top + front -->
+    <polygon points="331,256 472,256 432,216 291,216" fill="#F2EFFB" stroke="#BCB4E4" stroke-width="2.5" stroke-linejoin="round"/>
+    <polygon points="331,256 472,256 472,336 331,336" fill="#E8E4F6" stroke="#BCB4E4" stroke-width="2.5" stroke-linejoin="round"/>
+  </g>
+
+  <!-- ===== Interpenetration: cuboid section inside the cube ===== -->
+  <g>
+    <!-- top face of the shared volume -->
+    <polygon points="181,256 331,256 291,216 141,216" fill="#4F46E5" opacity="0.22"/>
+    <!-- front face of the shared volume -->
+    <polygon points="181,256 331,256 331,336 181,336" fill="#4F46E5" opacity="0.22"/>
+
+    <!-- dashed boundary of the impossible shared volume -->
+    <polygon points="181,256 331,256 291,216 141,216" fill="none" stroke="#4F46E5" stroke-width="3" stroke-dasharray="10 8" opacity="0.9"/>
+    <polygon points="181,256 331,256 331,336 181,336" fill="none" stroke="#4F46E5" stroke-width="3" stroke-dasharray="10 8" opacity="0.9"/>
+    <line x1="141" y1="216" x2="181" y2="336" stroke="#4F46E5" stroke-width="3" stroke-dasharray="10 8" opacity="0.9"/>
+    <line x1="291" y1="216" x2="331" y2="336" stroke="#4F46E5" stroke-width="3" stroke-dasharray="10 8" opacity="0.9"/>
+  </g>
+</svg>

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pollinations Image Test</title>
+<style>
+  body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }
+  pre { background: #f0f0f0; padding: 12px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; }
+  .result { border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin: 20px 0; min-height: 100px; }
+  .ok { color: green; }
+  .fail { color: red; }
+  img { max-width: 100%; }
+  button { padding: 10px 24px; font-size: 16px; cursor: pointer; margin: 5px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<h1>Pollinations.ai Image Loading Test</h1>
+<p>This page tests whether your browser can load images from Pollinations.ai using different methods.</p>
+
+<h2>Test 1: Direct &lt;img&gt; tag</h2>
+<p>URL: <a id="url1" href="#" target="_blank">open in new tab</a></p>
+<pre id="pre1"></pre>
+<div class="result">
+  <img id="img1" src="" alt="Test 1" style="max-width:512px;">
+  <p id="status1">Loading...</p>
+</div>
+
+<h2>Test 2: new Image() preload (what our code uses)</h2>
+<pre id="pre2"></pre>
+<div class="result">
+  <img id="img2" src="" alt="Test 2" style="max-width:512px;">
+  <p id="status2">Waiting for button click...</p>
+</div>
+<button id="btn2">Run Test 2</button>
+
+<h2>Test 3: fetch() then blob URL</h2>
+<pre id="pre3"></pre>
+<div class="result">
+  <img id="img3" src="" alt="Test 3" style="max-width:512px;">
+  <p id="status3">Waiting for button click...</p>
+</div>
+<button id="btn3">Run Test 3</button>
+
+<h2>Test 4: Long prompt (simulating our actual usage)</h2>
+<pre id="pre4"></pre>
+<div class="result">
+  <img id="img4" src="" alt="Test 4" style="max-width:512px;">
+  <p id="status4">Waiting for button click...</p>
+</div>
+<button id="btn4">Run Test 4</button>
+
+<script>
+const BASE = 'https://image.pollinations.ai/prompt/';
+const PARAMS = '?model=flux&width=512&height=512&nologo=true';
+const SIMPLE_PROMPT = 'A sleek modern water bottle, product photography on white background, studio lighting';
+
+// Test 1: Direct img tag
+(function() {
+  var url = BASE + encodeURIComponent(SIMPLE_PROMPT) + PARAMS;
+  document.getElementById('pre1').textContent = 'URL length: ' + url.length;
+  document.getElementById('url1').href = url;
+  var img = document.getElementById('img1');
+  var status = document.getElementById('status1');
+  img.onload = function() { status.textContent = 'OK - Image loaded! (' + img.naturalWidth + 'x' + img.naturalHeight + ')'; status.className = 'ok'; };
+  img.onerror = function() { status.textContent = 'FAILED - onerror fired'; status.className = 'fail'; };
+  img.src = url;
+})();
+
+// Test 2: new Image() preload
+document.getElementById('btn2').addEventListener('click', function() {
+  var url = BASE + encodeURIComponent(SIMPLE_PROMPT) + PARAMS;
+  document.getElementById('pre2').textContent = 'URL length: ' + url.length;
+  var img = document.getElementById('img2');
+  var status = document.getElementById('status2');
+  status.textContent = 'Loading...';
+  status.className = '';
+
+  var loader = new Image();
+  var tid = setTimeout(function() { status.textContent = 'TIMEOUT after 30s'; status.className = 'fail'; }, 30000);
+  loader.onload = function() {
+    clearTimeout(tid);
+    img.src = url;
+    status.textContent = 'OK - new Image() loaded! (' + loader.naturalWidth + 'x' + loader.naturalHeight + ')';
+    status.className = 'ok';
+  };
+  loader.onerror = function() {
+    clearTimeout(tid);
+    status.textContent = 'FAILED - loader.onerror fired';
+    status.className = 'fail';
+  };
+  loader.src = url;
+});
+
+// Test 3: fetch() approach
+document.getElementById('btn3').addEventListener('click', async function() {
+  var url = BASE + encodeURIComponent(SIMPLE_PROMPT) + PARAMS;
+  document.getElementById('pre3').textContent = 'URL length: ' + url.length;
+  var img = document.getElementById('img3');
+  var status = document.getElementById('status3');
+  status.textContent = 'Fetching...';
+  status.className = '';
+  try {
+    var resp = await fetch(url);
+    status.textContent = 'Fetch response: HTTP ' + resp.status + ' ' + resp.statusText;
+    if (resp.ok) {
+      var blob = await resp.blob();
+      img.src = URL.createObjectURL(blob);
+      status.textContent += ' - OK! Blob size: ' + blob.size + ' bytes';
+      status.className = 'ok';
+    } else {
+      status.className = 'fail';
+    }
+  } catch(e) {
+    status.textContent = 'FAILED - ' + e.message;
+    status.className = 'fail';
+  }
+});
+
+// Test 4: Long prompt with negative prompt
+document.getElementById('btn4').addEventListener('click', function() {
+  var prompt = 'Professional industrial design concept rendering of a small appliance. Design language: Organic Flow. The product housing is injection-molded ABS thermoplastic with matte surface. Manufacturing details: parting line hidden on bottom, fine matte bead-blasted surface texture. Rendered as professional product photograph on white background, studio lighting, 3/4 angle, 8k';
+  var negative = 'worst quality, blurry, distorted, low resolution, watermark, text, logo, sketch, cartoon, 2d, flat, abstract, metal, wood, glass, stone';
+  var params = '?model=flux&width=512&height=512&seed=42&enhance=true&nologo=true&safe=true&negative_prompt=' + encodeURIComponent(negative);
+  var url = BASE + encodeURIComponent(prompt) + params;
+  document.getElementById('pre4').textContent = 'URL length: ' + url.length + ' | prompt length: ' + prompt.length;
+  var img = document.getElementById('img4');
+  var status = document.getElementById('status4');
+  status.textContent = 'Loading...';
+  status.className = '';
+
+  var loader = new Image();
+  var tid = setTimeout(function() { status.textContent = 'TIMEOUT after 30s'; status.className = 'fail'; }, 30000);
+  loader.onload = function() {
+    clearTimeout(tid);
+    img.src = url;
+    status.textContent = 'OK - Loaded! (' + loader.naturalWidth + 'x' + loader.naturalHeight + ')';
+    status.className = 'ok';
+  };
+  loader.onerror = function() {
+    clearTimeout(tid);
+    status.textContent = 'FAILED - loader.onerror fired';
+    status.className = 'fail';
+  };
+  loader.src = url;
+});
+</script>
+</body>
+</html>
