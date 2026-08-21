@@ -27,17 +27,15 @@
     { hash: '#/read',         label: 'Read the Image' },
     { hash: '#/cases',        label: 'Cases' },
     { hash: '#/your-image',   label: 'Your Image' },
-    { hash: '#/decision',     label: 'Decision' },
     { hash: '#/about',        label: 'About' }
   ];
 
-  /* Five-part toolkit structure (learning sequence) */
+  /* Four-part toolkit structure (learning sequence) */
   var FLOW = [
-    { title: 'Calibrate Capabilities', desc: 'Understand what AI images can support — and what each capability cannot prove.' },
-    { title: 'Read Errors & Uncertainty', desc: 'Build a structured vocabulary for Observable Errors, Logic Gaps, and Unverified Claims.' },
-    { title: 'Practice with Cases', desc: 'Work through preset cases before analysing your own images.' },
-    { title: 'Apply to Your Image', desc: 'Upload your own AI concept image and annotate it with the framework.' },
-    { title: 'Decide & Next Actions', desc: 'Turn reflection into a concrete design decision and next step.' }
+    { title: 'Check Capabilities', desc: 'Understand what AI images can do — and what they cannot prove.' },
+    { title: 'Read Errors & Uncertainty', desc: 'Learn to name three kinds of issues: mistakes you can see, gaps in logic, and claims without proof.' },
+    { title: 'Practice with Cases', desc: 'Work through sample cases before you analyse your own image.' },
+    { title: 'Apply to Your Image', desc: 'Upload your own AI image and mark up the errors you spot.' }
   ];
 
   /* ===================================================================
@@ -185,9 +183,44 @@
         '</div>' +
       '</section>' +
 
+      // Four-part structure
+      '<section class="section">' +
+        '<div class="container">' +
+          '<div class="section__header">' +
+            sectionEyebrow('How to use it') +
+            '<h2 class="section__title">Four parts, one learning sequence.</h2>' +
+            '<p class="section__lead">You can browse freely, but the sequence below is the recommended first-time path.</p>' +
+          '</div>' +
+          '<div class="flow-alt" data-flow>' +
+            FLOW.map(function (step, i) {
+              var flip = (i % 2 === 1) ? ' flow-alt__step--flip' : '';
+              return (
+                '<div class="flow-alt__step' + flip + '">' +
+                  (i === 0
+                    ? '<figure class="flow-alt__media" aria-hidden="true">' +
+                        '<div class="split">' +
+                          '<img class="split__l" src="assets/d1.png" alt="" loading="lazy">' +
+                          '<img class="split__r" src="assets/d2.png" alt="" loading="lazy">' +
+                        '</div>' +
+                      '</figure>'
+                    : '<figure class="flow-alt__media" aria-hidden="true">' +
+                        '<img src="assets/flow-' + (i + 1) + '.png" alt="" loading="lazy">' +
+                      '</figure>') +
+                  '<div class="flow-alt__body">' +
+                    '<div class="flow-alt__num">' + (i + 1) + '</div>' +
+                    '<h3 class="flow-alt__title">' + escapeHtml(step.title) + '</h3>' +
+                    '<p class="flow-alt__desc">' + escapeHtml(step.desc) + '</p>' +
+                  '</div>' +
+                '</div>'
+              );
+            }).join('') +
+          '</div>' +
+        '</div>' +
+      '</section>' +
+
       // Problem context
       '<section class="section">' +
-        '<div class="container container--narrow">' +
+        '<div class="container">' +
           '<div class="section__header">' +
             sectionEyebrow('Why this exists') +
             '<h2 class="section__title">AI images can look finished before the design truly is.</h2>' +
@@ -214,37 +247,14 @@
             '</div>' +
           '</div>' +
         '</div>' +
-      '</section>' +
-
-      // Five-part structure
-      '<section class="section">' +
-        '<div class="container">' +
-          '<div class="section__header">' +
-            sectionEyebrow('How to use it') +
-            '<h2 class="section__title">Five parts, one learning sequence.</h2>' +
-            '<p class="section__lead">You can browse freely, but the sequence below is the recommended first-time path.</p>' +
-          '</div>' +
-          '<div class="flow">' +
-            FLOW.map(function (step, i) {
-              var arrow = (i < FLOW.length - 1) ? '<div class="flow__arrow">↓</div>' : '';
-              return (
-                '<div class="flow__step">' +
-                  '<div class="flow__num">' + (i + 1) + '</div>' +
-                  '<div class="flow__body">' +
-                    '<div class="flow__title">' + escapeHtml(step.title) + '</div>' +
-                    '<div class="flow__desc">' + escapeHtml(step.desc) + '</div>' +
-                  '</div>' +
-                '</div>' + arrow
-              );
-            }).join('') +
-          '</div>' +
-        '</div>' +
       '</section>';
 
     var hero = container.querySelector('.hero');
     var box = container.querySelector('[data-hero-box]');
     var photo = container.querySelector('.hero__photo');
     var overlay = container.querySelector('.hero__overlay');
+    var flowVisual = container.querySelector('[data-flow]');
+    var flowFigs = flowVisual ? flowVisual.querySelectorAll('.flow-alt__media') : [];
 
     function onScroll() {
       if (!hero) return;
@@ -266,14 +276,37 @@
       }
     }
 
+    // Subtle parallax for the "How to use it" illustration gallery — each tile
+    // drifts vertically at its own depth as the user scrolls, in the spirit of
+    // big-brand editorial sites.
+    var FLOW_SPEED = [30, 18, 24, 12];
+    function onFlowScroll() {
+      if (!flowVisual) return;
+      var vh = window.innerHeight || 1;
+      for (var i = 0; i < flowFigs.length; i++) {
+        var fig = flowFigs[i];
+        var target = fig.querySelector('.split') || fig.querySelector('img');
+        if (!target) continue;
+        var rect = fig.getBoundingClientRect();
+        var center = rect.top + rect.height / 2;
+        var p = (center - vh / 2) / vh; // ~ -0.5 .. 0.5 while visible
+        target.style.transform = 'translateY(' + (p * FLOW_SPEED[i % FLOW_SPEED.length]).toFixed(1) + 'px)';
+      }
+    }
+
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll);
+    window.addEventListener('scroll', onFlowScroll, { passive: true });
+    window.addEventListener('resize', onFlowScroll);
     onScroll();
+    onFlowScroll();
 
     return {
       destroy: function () {
         window.removeEventListener('scroll', onScroll);
         window.removeEventListener('resize', onScroll);
+        window.removeEventListener('scroll', onFlowScroll);
+        window.removeEventListener('resize', onFlowScroll);
       }
     };
   }
@@ -284,8 +317,8 @@
 
   function renderAbout(container) {
     container.innerHTML =
-      '<section class="section" style="padding-top: calc(var(--header-height) + var(--spacing-5xl))">' +
-        '<div class="container container--narrow">' +
+      '<section class="section section--narrow" style="padding-top: calc(var(--header-height) + var(--spacing-5xl))">' +
+        '<div class="container">' +
           '<div class="section__header">' +
             sectionEyebrow('About') +
             '<h1 class="section__title" style="font-size: clamp(2rem, 5vw, 3rem)">About the project</h1>' +
@@ -1250,7 +1283,7 @@
 
       container.innerHTML =
         '<section class="yi">' +
-          '<div class="container container--narrow">' +
+          '<div class="container">' +
             headerHtml('Your Image · Step 1 of 3', 'What were you trying to create?',
               'Add your image and a short note about what you asked the AI to do. This becomes the baseline you compare your review against.') +
             '<div class="yi-card">' +
@@ -1374,7 +1407,11 @@
                   '<span class="yi-noconcern__box">' + (state.noConcern ? '✓' : '') + '</span>' +
                   'I do not notice a concern at this stage.' +
                 '</button>' +
-                '<button type="button" class="btn btn--primary btn--lg" data-action="submit-review">Submit My First Review</button>' +
+                '<div class="yi-actions">' +
+                  '<button type="button" class="btn btn--primary btn--lg" data-action="submit-review">Submit My First Review</button>' +
+                  '<button type="button" class="btn btn--outline btn--lg" data-action="back-step">Back</button>' +
+                  '<button type="button" class="btn btn--outline btn--lg" data-action="restart">Start over</button>' +
+                '</div>' +
               '</div>' +
             '</div>' +
           '</div>' +
@@ -1512,7 +1549,7 @@
           '<div class="yi-ai yi-ai--error">' +
             '<p class="yi-ai__error-text">' + escapeHtml(state.ai.error) + '</p>' +
             '<p class="yi-ai__error-hint">Tip: to enable AI suggestions, run the local server with <code>node server.js</code> and open this page through it. You can still create your record from your own notes only.</p>' +
-            '<div class="yi-actions"><button type="button" class="btn btn--outline" data-action="ai-retry">Try again</button></div>' +
+            '<div class="yi-actions"><button type="button" class="btn btn--outline btn--lg" data-action="ai-retry">Try again</button></div>' +
           '</div>';
       } else if (state.ai.status === 'done' && !state.ai.questions.length) {
         body =
@@ -1535,13 +1572,15 @@
 
       container.innerHTML =
         '<section class="yi">' +
-          '<div class="container container--narrow">' +
+          '<div class="container">' +
             headerHtml('Your Image · Step 3 of 3', 'Here are a few additional questions that may be worth considering.',
               'These are suggestions, not confirmed problems. Keep only those that feel relevant to your image and intention.') +
             '<p class="yi-ai-note">The AI is a second reader and can miss things or be wrong. You keep the final call on every suggestion.</p>' +
             body +
-            '<div class="yi-actions">' +
+            '<div class="yi-actions yi-actions--inline">' +
               '<button type="button" class="btn btn--primary btn--lg" data-action="create-record">Create My Review Record</button>' +
+              '<button type="button" class="btn btn--outline btn--lg" data-action="back-step">Back to my notes</button>' +
+              '<button type="button" class="btn btn--outline btn--lg" data-action="restart">Start a new review</button>' +
             '</div>' +
           '</div>' +
         '</section>';
@@ -1597,7 +1636,7 @@
 
       container.innerHTML =
         '<section class="yi">' +
-          '<div class="container container--narrow">' +
+          '<div class="container">' +
             headerHtml('Your Image · Review Record', 'Your Review Record',
               'This record brings together what you noticed and the AI questions you chose to keep. It does not certify that the image is correct, usable, safe or feasible.') +
             '<div class="yi-record">' +
@@ -1821,7 +1860,12 @@
         state.step = 2; YI_save(); paint();
         return;
       }
+      if (action === 'back-step') {
+        state.step = Math.max(1, state.step - 1); YI_save(); paint();
+        return;
+      }
       if (action === 'restart') {
+        if (!window.confirm('Start a new review? Your current image, notes and AI questions will be cleared.')) return;
         YI_reset(); paint();
         return;
       }
@@ -1915,8 +1959,7 @@
     { target: '#/capabilities', title: 'AI Capability Cards',      body: "First, meet AI's capabilities. These cards show how AI can support early product design, as well as what its images cannot confirm. Start here to build a more realistic understanding of the tool." },
     { target: '#/read',         title: 'Error & Uncertainty Cards', body: "Learn what to look for. AI images may contain visible errors, hidden logic gaps or claims that still need evidence. These cards give you simple terms for describing what you notice." },
     { target: '#/cases',        title: 'Case Challenges',          body: "Ready for a quick challenge? Review an AI-generated concept, mark anything questionable and explain your reasoning. You can then compare your reading with a reference analysis." },
-    { target: '#/your-image',   title: 'Apply to Your Image',      body: "Now bring in your own image. Upload an AI-generated product image and use the cards to examine it. Mark what you can see, what you are assuming and what still needs to be checked." },
-    { target: '#/decision',     title: 'Decide What Happens Next', body: "Pause before moving forward. Your review does not have to end with 'accept' or 'reject'. Decide whether the concept should be retained, revised, compared, tested or verified." }
+    { target: '#/your-image',   title: 'Apply to Your Image',      body: "Now bring in your own image. Upload an AI-generated product image and use the cards to examine it. Mark what you can see, what you are assuming and what still needs to be checked." }
   ];
 
   function startTour() {
@@ -2014,7 +2057,6 @@
       '#/read': renderRead,
       '#/cases': renderCases,
       '#/your-image': renderYourImage,
-      '#/decision': placeholderPage('Decision', 'Turn reflection into a design decision — coming soon.'),
       '#/about': renderAbout
     };
 
