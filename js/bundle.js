@@ -23,10 +23,10 @@
 
   var NAV = [
     { hash: '#/overview',     label: 'Overview' },
-    { hash: '#/capabilities', label: 'Capabilities' },
-    { hash: '#/read',         label: 'Read the Image' },
-    { hash: '#/cases',        label: 'Cases' },
-    { hash: '#/your-image',   label: 'Your Image' },
+    { hash: '#/capabilities', label: 'Capability Cards' },
+    { hash: '#/read',         label: 'Review Cards' },
+    { hash: '#/cases',        label: 'Case Challenges' },
+    { hash: '#/your-image',   label: 'Your Image Review' },
     { hash: '#/about',        label: 'About' }
   ];
 
@@ -1193,6 +1193,7 @@
     var drawTool = 'ellipse';
     var draft = null;
     var noteLinks = [];
+    var noteCard = '';
     var uid = (function () {
       var n = 0;
       return function () { n++; return 'yi-' + n + '-' + Math.random().toString(36).slice(2, 7); };
@@ -1227,6 +1228,15 @@
       for (var i = 0; i < CARDS.length; i++) if (CARDS[i].id === id) return CARDS[i].title;
       return '';
     }
+    function cardObj(id) {
+      for (var i = 0; i < CARDS.length; i++) if (CARDS[i].id === id) return CARDS[i];
+      return null;
+    }
+    function capObj(title) {
+      var caps = data.CAPABILITIES || [];
+      for (var i = 0; i < caps.length; i++) if (caps[i].title === title) return caps[i];
+      return null;
+    }
     function annIndexOf(id) {
       for (var i = 0; i < state.annotations.length; i++) if (state.annotations[i].id === id) return i;
       return -1;
@@ -1234,6 +1244,73 @@
     function fitZoom() {
       if (!natural.w) return 1;
       return Math.max(0.12, Math.min(2, 540 / natural.w));
+    }
+
+    /* ---- floating card preview ---- */
+    var previewEl = null;
+    function ensurePreview() {
+      if (previewEl) return previewEl;
+      previewEl = document.createElement('div');
+      previewEl.className = 'yi-preview';
+      previewEl.setAttribute('role', 'tooltip');
+      document.body.appendChild(previewEl);
+      return previewEl;
+    }
+    function previewContent(kind, ref) {
+      if (kind === 'cap') {
+        var c = capObj(ref);
+        if (!c) return '';
+        return '<div class="yi-preview__img"><img src="' + c.front + '" alt=""></div>' +
+          '<div class="yi-preview__body"><div class="yi-preview__title">' + escapeHtml(c.title) + '</div></div>';
+      }
+      var cc = cardObj(ref);
+      if (!cc) return '';
+      return '<div class="yi-preview__img"><img src="' + cc.image + '" alt=""></div>' +
+        '<div class="yi-preview__body">' +
+          '<div class="yi-preview__title">' + escapeHtml(cc.title) + '</div>' +
+          (cc.helperTitle ? '<div class="yi-preview__zh">' + escapeHtml(cc.helperTitle) + '</div>' : '') +
+          '<div class="yi-preview__meta">' + escapeHtml(cc.inspectionFocus || '') + ' · ' + escapeHtml(cc.judgementLevel || '') + '</div>' +
+        '</div>';
+    }
+    function showPreview(anchor, kind, ref) {
+      var html = previewContent(kind, ref);
+      if (!html) { hidePreview(); return; }
+      var p = ensurePreview();
+      p.innerHTML = html;
+      p.classList.toggle('yi-preview--cap', kind === 'cap');
+      p.classList.add('is-visible');
+      var r = anchor.getBoundingClientRect();
+      var w = p.offsetWidth || 236;
+      var h = p.offsetHeight || 180;
+      var x = r.left - w - 12;
+      if (x < 8) x = r.right + 12;
+      var y = r.top;
+      if (y + h > window.innerHeight - 8) y = Math.max(8, window.innerHeight - h - 8);
+      p.style.left = x + 'px';
+      p.style.top = y + 'px';
+    }
+    function hidePreview() {
+      if (previewEl) previewEl.classList.remove('is-visible');
+    }
+    function previewFrom(el) {
+      var cap = el.getAttribute('data-preview-cap');
+      var card = el.getAttribute('data-preview-card');
+      if (cap != null) return { kind: 'cap', ref: cap };
+      if (card) return { kind: 'card', ref: card };
+      return null;
+    }
+    function onPreviewIn(e) {
+      var el = e.target.closest('[data-preview-cap],[data-preview-card]');
+      if (!el) return;
+      var pr = previewFrom(el);
+      if (pr) showPreview(el, pr.kind, pr.ref);
+    }
+    function onPreviewOut(e) {
+      var el = e.target.closest('[data-preview-cap],[data-preview-card]');
+      if (!el) return;
+      if (e.relatedTarget && el.contains(e.relatedTarget)) return;
+      if (e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('[data-preview-cap],[data-preview-card]')) return;
+      hidePreview();
     }
 
     /* ---- stepper ---- */
@@ -1259,7 +1336,8 @@
     /* ---- Step 1 ---- */
     function paintStep1() {
       var capChips = CAP_OPTIONS.map(function (cap) {
-        return '<button type="button" class="chip' + (state.capability === cap ? ' is-selected' : '') + '" data-action="capability" data-val="' + escapeHtml(cap) + '">' + escapeHtml(cap) + '</button>';
+        var isCap = CAPS.indexOf(cap) >= 0;
+        return '<button type="button" class="chip' + (state.capability === cap ? ' is-selected' : '') + '" data-action="capability" data-val="' + escapeHtml(cap) + '"' + (isCap ? ' data-preview-cap="' + escapeHtml(cap) + '"' : '') + '>' + escapeHtml(cap) + '</button>';
       }).join('');
 
       var uploadHtml;
@@ -1342,6 +1420,24 @@
       }).join('');
     }
 
+    function cardPickerHtml() {
+      var label = noteCard ? cardTitle(noteCard) : 'Related card (optional)';
+      var options = '<button type="button" class="yi-select__option" data-action="pick-card" data-id="">None</button>' +
+        CARDS.map(function (c) {
+          return '<button type="button" class="yi-select__option' + (noteCard === c.id ? ' is-selected' : '') + '" data-action="pick-card" data-id="' + c.id + '" data-preview-card="' + c.id + '">' +
+            '<span class="yi-select__option-title">' + escapeHtml(c.title) + '</span>' +
+            '<span class="yi-select__option-zh">' + escapeHtml(c.helperTitle || '') + '</span>' +
+          '</button>';
+        }).join('');
+      return '<div class="yi-select" data-card-picker>' +
+        '<button type="button" class="yi-select__trigger" data-action="card-toggle">' +
+          '<span class="yi-select__label">' + escapeHtml(label) + '</span>' +
+          '<span class="yi-select__caret">▾</span>' +
+        '</button>' +
+        '<div class="yi-select__menu" data-card-menu>' + options + '</div>' +
+      '</div>';
+    }
+
     function toolbarHtml() {
       var tools = [
         { id: 'ellipse', label: 'Circle an area' },
@@ -1396,10 +1492,7 @@
                   '<span class="yi-field__label">Add a note</span>' +
                   '<textarea class="yi-input" rows="3" data-note-text placeholder="What did you notice here?"></textarea>' +
                   '<div class="yi-link" data-link>' + linkChipsHtml() + '</div>' +
-                  '<select class="yi-input" data-note-card>' +
-                    '<option value="">Related card (optional)</option>' +
-                    CARDS.map(function (c) { return '<option value="' + c.id + '">' + escapeHtml(c.title) + '</option>'; }).join('') +
-                  '</select>' +
+                  cardPickerHtml() +
                   '<button type="button" class="btn btn--outline btn--sm" data-action="save-note">Save note</button>' +
                   '<span class="yi-form-err u-hidden" data-note-err>Add a short note first.</span>' +
                 '</div>' +
@@ -1716,6 +1809,7 @@
         prompt: state.prompt,
         intention: state.intention,
         capability: state.capability || 'Not specified',
+        image: state.image || null,
         observations: state.observations.map(function (o) {
           return { text: o.text, card: o.card ? cardTitle(o.card) : null };
         }),
@@ -1763,6 +1857,23 @@
         YI_save(); paint();
         return;
       }
+      if (action === 'card-toggle') {
+        var menu = $('[data-card-menu]', container);
+        if (menu) menu.classList.toggle('is-open');
+        return;
+      }
+      if (action === 'pick-card') {
+        noteCard = el.getAttribute('data-id') || '';
+        var label = $('[data-card-picker] .yi-select__label', container);
+        if (label) label.textContent = noteCard ? cardTitle(noteCard) : 'Related card (optional)';
+        var m = $('[data-card-menu]', container);
+        if (m) m.classList.remove('is-open');
+        $$('[data-card-menu] [data-action="pick-card"]', container).forEach(function (b) {
+          b.classList.toggle('is-selected', b.getAttribute('data-id') === noteCard);
+        });
+        hidePreview();
+        return;
+      }
       if (action === 'start') {
         if (!state.image || !state.prompt.trim() || !state.intention.trim()) {
           var err = $('[data-err]', container);
@@ -1800,7 +1911,6 @@
       }
       if (action === 'save-note') {
         var ta = $('[data-note-text]', container);
-        var sel = $('[data-note-card]', container);
         var text = ta ? ta.value.trim() : '';
         if (!text) {
           var errEl = $('[data-note-err]', container);
@@ -1810,10 +1920,11 @@
         state.observations.push({
           id: uid(),
           text: text,
-          card: sel && sel.value ? sel.value : null,
+          card: noteCard || null,
           annotationIds: noteLinks.slice()
         });
         noteLinks = [];
+        noteCard = '';
         YI_save(); paint();
         return;
       }
@@ -1899,6 +2010,7 @@
     }
 
     function paint() {
+      hidePreview();
       if (state.step === 1) paintStep1();
       else if (state.step === 2) paintStep2();
       else if (state.step === 3) paintStep3();
@@ -1909,6 +2021,10 @@
     container.addEventListener('click', onClick);
     container.addEventListener('input', onInput);
     container.addEventListener('change', onChange);
+    container.addEventListener('mouseover', onPreviewIn);
+    container.addEventListener('mouseout', onPreviewOut);
+    container.addEventListener('focusin', onPreviewIn);
+    container.addEventListener('focusout', onPreviewOut);
 
     paint();
 
@@ -1917,6 +2033,12 @@
         container.removeEventListener('click', onClick);
         container.removeEventListener('input', onInput);
         container.removeEventListener('change', onChange);
+        container.removeEventListener('mouseover', onPreviewIn);
+        container.removeEventListener('mouseout', onPreviewOut);
+        container.removeEventListener('focusin', onPreviewIn);
+        container.removeEventListener('focusout', onPreviewOut);
+        if (previewEl && previewEl.parentNode) previewEl.parentNode.removeChild(previewEl);
+        previewEl = null;
       }
     };
   }

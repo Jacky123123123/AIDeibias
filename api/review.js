@@ -5,19 +5,21 @@
  * Vercel, this file becomes https://<your-app>.vercel.app/api/review and the
  * frontend calls it same-origin, so no CORS is needed in normal use.
  *
- * The DeepSeek key is read from the Vercel environment variable
- * DEEPSEEK_API_KEY (set it in the Vercel dashboard — never in the repo).
+ * The OpenAI key is read from the Vercel environment variable
+ * IC_KEY (set it in the Vercel dashboard — never in the repo).
  *
  * Notes:
- * - DeepSeek's chat API is text-only, so the image itself is not sent. The
- *   request carries prompt / intention / capability / user notes / card list.
+ * - OpenAI's chat-completions API supports vision, so the student's image is
+ *   sent (as an image_url in the user message) along with the prompt,
+ *   intention, capability, user notes and card list.
  * - Rate limiting here is a best-effort in-memory limiter (per warm instance).
  *   For real protection add Upstash Ratelimit and restrict ALLOWED_ORIGIN.
  */
 
 'use strict';
 
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
+const IC_KEY = process.env.IC_KEY || process.env.OPENAI_API_KEY || '';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
 const RATE_LIMIT = parseInt(process.env.RATE_LIMIT || '15', 10);
 const RATE_WINDOW_MS = parseInt(process.env.RATE_WINDOW_MS || '300000', 10); // 5 min
@@ -84,6 +86,8 @@ function buildMessages(payload) {
     'their own AI-generated product concept image. The student has already written their ' +
     'own observations first. Your only job is to raise a few candidate follow-up questions ' +
     'they may have overlooked.\n\n' +
+    'The student has attached the image they are reviewing. Look at it directly, and ground ' +
+    'any question in what is actually visible in the image and in the text below.\n\n' +
     'Rules:\n' +
     '- Ask open questions only. Never state conclusions. Use wording such as "may", ' +
     '"appears", "could", or "needs checking".\n' +
@@ -92,19 +96,20 @@ function buildMessages(payload) {
     '- Prefer design-logic questions that are hard to spot at a glance (e.g. whether ' +
     'something actually works in use, or whether a claim is unverified), over obvious ' +
     'rendering glitches.\n' +
-    '- Only raise a question when there is a reasonable basis in the prompt, intention, ' +
-    'capability or the student notes. If there is no solid basis, return zero questions.\n' +
+    '- Only raise a question when there is a reasonable basis in the image, the prompt, ' +
+    'the intention, the capability or the student notes. If there is no solid basis, ' +
+    'return zero questions.\n' +
     '- Return at most 4 questions; fewer (including zero) is fine. Do not invent questions ' +
     'to reach a count.\n' +
     '- Reply with ONLY valid JSON, no markdown fences, no commentary, in exactly this shape:\n' +
     '{"questions":[{"question":"...","basis":"...","relatedCard":"..."}]}\n' +
     '- "question": a friendly, open question in plain English.\n' +
-    '- "basis": one short sentence saying why this was raised (refer to the prompt, the ' +
-    'intention, the capability, or a note).\n' +
+    '- "basis": one short sentence saying why this was raised (refer to the image, the ' +
+    'prompt, the intention, the capability, or a note).\n' +
     '- "relatedCard": the closest card title from the provided list, or exactly ' +
     '"No direct card match" if none fits.';
 
-  const user =
+  const userText =
     'Student input:\n' +
     'Prompt: ' + (payload.prompt || '') + '\n' +
     'Intended use: ' + (payload.intention || '') + '\n' +
@@ -113,21 +118,26 @@ function buildMessages(payload) {
     'Available Error & Uncertainty Cards: ' + cards + '\n\n' +
     'Raise up to 4 candidate follow-up questions as JSON.';
 
+  const userContent = [{ type: 'text', text: userText }];
+  if (payload.image && typeof payload.image === 'string') {
+    userContent.push({ type: 'image_url', image_url: { url: payload.image } });
+  }
+
   return [
     { role: 'system', content: system },
-    { role: 'user', content: user }
+    { role: 'user', content: userContent }
   ];
 }
 
-async function callDeepSeek(payload) {
-  const resp = await fetch('https://api.deepseek.com/chat/completions', {
+async function callOpenAI(payload) {
+  const resp = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + DEEPSEEK_API_KEY
+      'Authorization': 'Bearer ' + IC_KEY
     },
     body: JSON.stringify({
-      model: 'deepseek-chat',
+      model: OPENAI_MODEL,
       messages: buildMessages(payload),
       response_format: { type: 'json_object' },
       temperature: 0.4,
@@ -137,7 +147,7 @@ async function callDeepSeek(payload) {
 
   if (!resp.ok) {
     const text = await resp.text();
-    throw new Error('DeepSeek HTTP ' + resp.status + ': ' + text.slice(0, 300));
+    throw new Error('OpenAI HTTP ' + resp.status + ': ' + text.slice(0, 300));
   }
 
   const data = await resp.json();
@@ -176,8 +186,8 @@ module.exports = async function handler(req, res) {
       json(res, 405, { error: 'Method not allowed' });
       return;
     }
-    if (!DEEPSEEK_API_KEY) {
-      json(res, 503, { error: 'DEEPSEEK_API_KEY is not set in this deployment.' });
+    if (!IC_KEY) {
+      json(res, 503, { error: 'IC_KEY is not set in this deployment.' });
       return;
     }
     if (isRateLimited(getClientIp(req))) {
@@ -185,7 +195,7 @@ module.exports = async function handler(req, res) {
       return;
     }
     const payload = await readBody(req);
-    const result = await callDeepSeek(payload);
+    const result = await callOpenAI(payload);
     json(res, 200, result);
   } catch (err) {
     console.error('[api/review]', err.message);
