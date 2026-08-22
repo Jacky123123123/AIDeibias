@@ -1820,8 +1820,10 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       }).then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
+        return r.json().then(function (body) {
+          if (!r.ok) throw new Error(body && body.error ? body.error : ('HTTP ' + r.status));
+          return body;
+        });
       }).then(function (res) {
         if (res && res.questions) {
           state.ai.questions = res.questions.map(function (q) {
@@ -1833,9 +1835,12 @@
           state.ai.error = 'The AI did not return a usable response. You can still create your record from your own notes.';
         }
         paint();
-      }).catch(function () {
+      }).catch(function (err) {
         state.ai.status = 'error';
-        state.ai.error = 'Could not reach the AI helper. You can still create your record with only your own notes.';
+        var msg = err && err.message ? err.message : '';
+        state.ai.error = (msg && msg !== 'Failed to fetch')
+          ? msg
+          : 'Could not reach the AI helper. You can still create your record with only your own notes.';
         paint();
       });
     }

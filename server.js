@@ -1,26 +1,26 @@
 /**
- * AI Debias Kit — local dev server + OpenAI proxy
+ * AI Debias Kit — local dev server + AI proxy (OpenAI, with Qwen fallback)
  *
  * Why this exists:
- *   The toolkit is a pure-frontend SPA. The OpenAI API key must never be
- *   embedded in the browser bundle (any visitor could read it), and the OpenAI
- *   endpoint does not allow cross-origin browser calls. This tiny server:
+ *   The toolkit is a pure-frontend SPA. AI API keys must never be embedded in
+ *   the browser bundle (any visitor could read them), and these endpoints do
+ *   not allow cross-origin browser calls. This tiny server:
  *     1. serves the static site, and
- *     2. proxies POST /api/review to OpenAI on the server side.
+ *     2. proxies POST /api/review to an AI provider on the server side.
  *
  * Run:
  *   node server.js
  * Then open http://localhost:3000
  *
- * API key:
- *   Set it in a local .env file next to this script (already gitignored):
- *       IC_KEY=sk-...
- *   or export it in your shell before running.
+ * API keys (set in a local .env next to this script — already gitignored):
+ *       IC_KEY=sk-...         (OpenAI)
+ *       QWEN_API_KEY=sk-...   (Alibaba Qwen-VL, reachable inside mainland China)
+ *   or export them in your shell before running.
  *
- * Note: OpenAI's chat-completions API supports vision, so the student's image
- * is sent to the model (as an image_url in the user message) along with the
- * prompt, intention, capability and the student's own notes. The model returns
- * candidate follow-up questions framed as "worth checking" — never verdicts.
+ * Provider order: OpenAI is tried first (with a short timeout); if it cannot be
+ * reached, the request falls back to Qwen automatically. Both are vision-capable
+ * and receive the student's image (image_url) plus the text, and return candidate
+ * follow-up questions framed as "worth checking" — never verdicts.
  */
 
 'use strict';
@@ -45,8 +45,11 @@ function loadEnv() {
   }
 }
 loadEnv();
-const API_KEY = process.env.IC_KEY || process.env.OPENAI_API_KEY || '';
+const OPENAI_API_KEY = process.env.IC_KEY || process.env.OPENAI_API_KEY || '';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
+const QWEN_API_KEY = process.env.QWEN_API_KEY || '';
+const QWEN_MODEL = process.env.QWEN_MODEL || 'qwen-vl-max';
+const OPENAI_TIMEOUT_MS = parseInt(process.env.OPENAI_TIMEOUT_MS || '12000', 10);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -158,12 +161,32 @@ function buildMessages(payload) {
   ];
 }
 
+function parseQuestions(content) {
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch (e) {
+    // Some models wrap JSON in code fences; strip them as a fallback.
+    const cleaned = content.replace(/```json/gi, '').replace(/```/g, '').trim();
+    parsed = JSON.parse(cleaned);
+  }
+  const questions = (parsed.questions || [])
+    .filter((q) => q && q.question)
+    .slice(0, 4)
+    .map((q) => ({
+      question: String(q.question).trim(),
+      basis: String(q.basis || '').trim(),
+      relatedCard: String(q.relatedCard || 'No direct card match').trim()
+    }));
+  return { questions: questions };
+}
+
 async function callOpenAI(payload) {
   const resp = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + API_KEY
+      'Authorization': 'Bearer ' + OPENAI_API_KEY
     },
     body: JSON.stringify({
       model: OPENAI_MODEL,
@@ -171,7 +194,8 @@ async function callOpenAI(payload) {
       response_format: { type: 'json_object' },
       temperature: 0.4,
       max_tokens: 1200
-    })
+    }),
+    signal: AbortSignal.timeout(OPENAI_TIMEOUT_MS)
   });
 
   if (!resp.ok) {
@@ -183,26 +207,54 @@ async function callOpenAI(payload) {
   const content = data.choices && data.choices[0] && data.choices[0].message
     ? data.choices[0].message.content
     : '';
+  return parseQuestions(content);
+}
 
-  let parsed;
-  try {
-    parsed = JSON.parse(content);
-  } catch (e) {
-    // Some models wrap JSON in code fences; strip them as a fallback.
-    const cleaned = content.replace(/```json/gi, '').replace(/```/g, '').trim();
-    parsed = JSON.parse(cleaned);
+async function callQwen(payload) {
+  const resp = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + QWEN_API_KEY
+    },
+    body: JSON.stringify({
+      model: QWEN_MODEL,
+      messages: buildMessages(payload),
+      temperature: 0.4,
+      max_tokens: 1200
+    })
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error('Qwen HTTP ' + resp.status + ': ' + text.slice(0, 300));
   }
 
-  const questions = (parsed.questions || [])
-    .filter((q) => q && q.question)
-    .slice(0, 4)
-    .map((q) => ({
-      question: String(q.question).trim(),
-      basis: String(q.basis || '').trim(),
-      relatedCard: String(q.relatedCard || 'No direct card match').trim()
-    }));
+  const data = await resp.json();
+  const content = data.choices && data.choices[0] && data.choices[0].message
+    ? data.choices[0].message.content
+    : '';
+  return parseQuestions(content);
+}
 
-  return { questions: questions };
+async function callAI(payload) {
+  const errors = [];
+  if (OPENAI_API_KEY) {
+    try {
+      return await callOpenAI(payload);
+    } catch (e) {
+      errors.push('OpenAI: ' + e.message);
+      console.error('[ai] OpenAI failed, trying Qwen:', e.message);
+    }
+  }
+  if (QWEN_API_KEY) {
+    try {
+      return await callQwen(payload);
+    } catch (e) {
+      errors.push('Qwen: ' + e.message);
+    }
+  }
+  throw new Error(errors.join(' | ') || 'No AI provider key is configured.');
 }
 
 /* ---- Server ---- */
@@ -219,14 +271,14 @@ http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && (req.url || '').split('?')[0] === '/api/review') {
-      if (!API_KEY) {
-        json(res, 503, { error: 'IC_KEY is not set. Add it to a local .env file.' });
+      if (!OPENAI_API_KEY && !QWEN_API_KEY) {
+        json(res, 503, { error: 'No AI provider key is set. Add IC_KEY (OpenAI) or QWEN_API_KEY (Qwen) to .env.' });
         return;
       }
       const body = await readBody(req);
       let payload = {};
       try { payload = JSON.parse(body || '{}'); } catch (e) { payload = {}; }
-      const result = await callOpenAI(payload);
+      const result = await callAI(payload);
       json(res, 200, result);
       return;
     }
@@ -243,6 +295,7 @@ http.createServer(async (req, res) => {
   }
 }).listen(PORT, () => {
   console.log('AI Debias Kit running on http://localhost:' + PORT);
-  console.log(API_KEY ? 'OpenAI API key: loaded (model: ' + OPENAI_MODEL + ')' : 'OpenAI API key: NOT set (AI suggestions disabled)');
+  console.log(OPENAI_API_KEY ? 'OpenAI key: loaded (model: ' + OPENAI_MODEL + ')' : 'OpenAI key: NOT set');
+  console.log(QWEN_API_KEY ? 'Qwen key: loaded (model: ' + QWEN_MODEL + ')' : 'Qwen key: NOT set');
   console.log('');
 });

@@ -5,21 +5,27 @@
  * Vercel, this file becomes https://<your-app>.vercel.app/api/review and the
  * frontend calls it same-origin, so no CORS is needed in normal use.
  *
- * The OpenAI key is read from the Vercel environment variable
- * IC_KEY (set it in the Vercel dashboard — never in the repo).
+ * AI keys are read from Vercel environment variables (set them in the Vercel
+ * dashboard — never in the repo):
+ *   IC_KEY        OpenAI
+ *   QWEN_API_KEY  Alibaba Qwen-VL (reachable inside mainland China)
+ *
+ * Provider order: OpenAI is tried first (with a short timeout); if it cannot be
+ * reached, the request falls back to Qwen automatically. Both are vision-capable
+ * and receive the student's image (image_url) plus the text.
  *
  * Notes:
- * - OpenAI's chat-completions API supports vision, so the student's image is
- *   sent (as an image_url in the user message) along with the prompt,
- *   intention, capability, user notes and card list.
  * - Rate limiting here is a best-effort in-memory limiter (per warm instance).
  *   For real protection add Upstash Ratelimit and restrict ALLOWED_ORIGIN.
  */
 
 'use strict';
 
-const IC_KEY = process.env.IC_KEY || process.env.OPENAI_API_KEY || '';
+const OPENAI_API_KEY = process.env.IC_KEY || process.env.OPENAI_API_KEY || '';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
+const QWEN_API_KEY = process.env.QWEN_API_KEY || '';
+const QWEN_MODEL = process.env.QWEN_MODEL || 'qwen-vl-max';
+const OPENAI_TIMEOUT_MS = parseInt(process.env.OPENAI_TIMEOUT_MS || '12000', 10);
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
 const RATE_LIMIT = parseInt(process.env.RATE_LIMIT || '15', 10);
 const RATE_WINDOW_MS = parseInt(process.env.RATE_WINDOW_MS || '300000', 10); // 5 min
@@ -129,12 +135,32 @@ function buildMessages(payload) {
   ];
 }
 
+function parseQuestions(content) {
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch (e) {
+    // Some models wrap JSON in code fences; strip them as a fallback.
+    const cleaned = content.replace(/```json/gi, '').replace(/```/g, '').trim();
+    parsed = JSON.parse(cleaned);
+  }
+  const questions = (parsed.questions || [])
+    .filter((q) => q && q.question)
+    .slice(0, 4)
+    .map((q) => ({
+      question: String(q.question).trim(),
+      basis: String(q.basis || '').trim(),
+      relatedCard: String(q.relatedCard || 'No direct card match').trim()
+    }));
+  return { questions: questions };
+}
+
 async function callOpenAI(payload) {
   const resp = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + IC_KEY
+      'Authorization': 'Bearer ' + OPENAI_API_KEY
     },
     body: JSON.stringify({
       model: OPENAI_MODEL,
@@ -142,7 +168,8 @@ async function callOpenAI(payload) {
       response_format: { type: 'json_object' },
       temperature: 0.4,
       max_tokens: 1200
-    })
+    }),
+    signal: AbortSignal.timeout(OPENAI_TIMEOUT_MS)
   });
 
   if (!resp.ok) {
@@ -154,25 +181,54 @@ async function callOpenAI(payload) {
   const content = data.choices && data.choices[0] && data.choices[0].message
     ? data.choices[0].message.content
     : '';
+  return parseQuestions(content);
+}
 
-  let parsed;
-  try {
-    parsed = JSON.parse(content);
-  } catch (e) {
-    const cleaned = content.replace(/```json/gi, '').replace(/```/g, '').trim();
-    parsed = JSON.parse(cleaned);
+async function callQwen(payload) {
+  const resp = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + QWEN_API_KEY
+    },
+    body: JSON.stringify({
+      model: QWEN_MODEL,
+      messages: buildMessages(payload),
+      temperature: 0.4,
+      max_tokens: 1200
+    })
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error('Qwen HTTP ' + resp.status + ': ' + text.slice(0, 300));
   }
 
-  const questions = (parsed.questions || [])
-    .filter((q) => q && q.question)
-    .slice(0, 4)
-    .map((q) => ({
-      question: String(q.question).trim(),
-      basis: String(q.basis || '').trim(),
-      relatedCard: String(q.relatedCard || 'No direct card match').trim()
-    }));
+  const data = await resp.json();
+  const content = data.choices && data.choices[0] && data.choices[0].message
+    ? data.choices[0].message.content
+    : '';
+  return parseQuestions(content);
+}
 
-  return { questions: questions };
+async function callAI(payload) {
+  const errors = [];
+  if (OPENAI_API_KEY) {
+    try {
+      return await callOpenAI(payload);
+    } catch (e) {
+      errors.push('OpenAI: ' + e.message);
+      console.error('[api/review] OpenAI failed, trying Qwen:', e.message);
+    }
+  }
+  if (QWEN_API_KEY) {
+    try {
+      return await callQwen(payload);
+    } catch (e) {
+      errors.push('Qwen: ' + e.message);
+    }
+  }
+  throw new Error(errors.join(' | ') || 'No AI provider key is configured.');
 }
 
 module.exports = async function handler(req, res) {
@@ -186,8 +242,8 @@ module.exports = async function handler(req, res) {
       json(res, 405, { error: 'Method not allowed' });
       return;
     }
-    if (!IC_KEY) {
-      json(res, 503, { error: 'IC_KEY is not set in this deployment.' });
+    if (!OPENAI_API_KEY && !QWEN_API_KEY) {
+      json(res, 503, { error: 'No AI provider key is set. Add IC_KEY (OpenAI) or QWEN_API_KEY (Qwen).' });
       return;
     }
     if (isRateLimited(getClientIp(req))) {
@@ -195,7 +251,7 @@ module.exports = async function handler(req, res) {
       return;
     }
     const payload = await readBody(req);
-    const result = await callOpenAI(payload);
+    const result = await callAI(payload);
     json(res, 200, result);
   } catch (err) {
     console.error('[api/review]', err.message);
